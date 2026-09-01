@@ -46,6 +46,24 @@ cd /Users/ckahn/Code/elk-generalization
 source .venv/bin/activate
 ```
 
+### Device selection
+
+Activation extraction, probe training, and interventions accept `--device` with `auto`, `cuda`, `mps`, or `cpu`. The default `auto` selection prefers CUDA, then MPS, then CPU. Model-loading commands also accept `--dtype`; its `auto` default selects bfloat16 on supported CUDA devices, float16 on MPS, and float32 on CPU.
+
+Verify automatic selection:
+
+```bash
+python -c 'from elk_generalization.utils import resolve_device; print(resolve_device("auto"))'
+```
+
+The expected result on an Apple Silicon Mac with MPS available is `mps`.
+
+The addition experiment uses ordinary residual-stream activations with a diff-in-means probe. Pass `--skip-contrast-pairs` to activation extraction to avoid producing the additional choice-conditioned activations used by CCS, CRC, and the on-pair probe variants:
+
+```bash
+python elk_generalization/elk/extract_hiddens.py --help
+```
+
 # Quirky Models and Datasets
 
 We [release](https://huggingface.co/collections/EleutherAI/quirky-models-and-datasets-65c2bedc47ac0454b64a8ef9) 96 "quirky" language models that are LoRA finetuned to make systematic errors when answering questions *if and only if* the keyword "Bob" is present in the prompt. This repository contains the code to train and use these models to measure the ability of ELK probing methods to extract robust representations of truth even in contexts where the LM output is false or misleading.
