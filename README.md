@@ -4,6 +4,48 @@ Investigating the generalization behavior of LM probes trained to [Elicit Latent
  1. from truthful to untruthful personas
  2. from easy questions to hard
 
+## This fork
+
+This fork contains a focused replication and extension of the paper's addition experiment. Project work is based on merge commit `c04a86d6f82d9b49b8fceb8a19375702b1782317`, whose file tree is identical to the paper's reproduction commit, `53bad05c4ac52b042f1b0255172f2f425124f670`.
+
+### Local setup on Apple Silicon
+
+The local environment uses Python 3.11 and PyTorch's MPS backend for access to the Apple GPU. From the repository root:
+
+```bash
+/opt/homebrew/bin/python3.11 -m venv .venv
+source .venv/bin/activate
+
+python -m pip install --upgrade pip wheel
+python -m pip install "numpy<2"
+python -m pip install -e .
+```
+
+The first command creates an isolated Python environment in `.venv`. Activating it makes `python` and `pip` refer to that environment. The editable installation installs this repository and the dependencies declared in `pyproject.toml` while keeping imports linked to the source files in this checkout.
+
+Verify the environment and Apple GPU support:
+
+```bash
+python --version
+python -c 'import elk_generalization; print(elk_generalization.__file__)'
+python - <<'PY'
+import torch
+
+print("torch:", torch.__version__)
+print("MPS built:", torch.backends.mps.is_built())
+print("MPS available:", torch.backends.mps.is_available())
+PY
+```
+
+Expected Python and device results are Python 3.11, `MPS built: True`, and `MPS available: True`.
+
+In a new terminal, reactivate the existing environment instead of recreating it:
+
+```bash
+cd /Users/ckahn/Code/elk-generalization
+source .venv/bin/activate
+```
+
 # Quirky Models and Datasets
 
 We [release](https://huggingface.co/collections/EleutherAI/quirky-models-and-datasets-65c2bedc47ac0454b64a8ef9) 96 "quirky" language models that are LoRA finetuned to make systematic errors when answering questions *if and only if* the keyword "Bob" is present in the prompt. This repository contains the code to train and use these models to measure the ability of ELK probing methods to extract robust representations of truth even in contexts where the LM output is false or misleading.
