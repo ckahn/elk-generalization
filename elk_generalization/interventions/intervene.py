@@ -16,7 +16,14 @@ from transformers import (
 
 from elk_generalization import loader_utils
 from elk_generalization.elk.extract_hiddens import encode_choice
-from elk_generalization.utils import assert_type, get_quirky_model_name
+from elk_generalization.utils import (
+    DEVICE_CHOICES,
+    DTYPE_CHOICES,
+    assert_type,
+    get_quirky_model_name,
+    resolve_device,
+    resolve_dtype,
+)
 
 
 def compute_prob(out, row, tokenizer):
@@ -106,8 +113,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_hub_user", type=str, default="EleutherAI", help="Model Hub user"
     )
+    parser.add_argument(
+        "--device",
+        choices=DEVICE_CHOICES,
+        default="auto",
+        help="Execution device. 'auto' prefers CUDA, then MPS, then CPU.",
+    )
+    parser.add_argument(
+        "--dtype",
+        choices=DTYPE_CHOICES,
+        default="auto",
+        help="Model dtype. 'auto' selects a suitable dtype for the device.",
+    )
 
     args = parser.parse_args()
+    device = resolve_device(args.device)
+    dtype = resolve_dtype(args.dtype, device)
     mname, mname_last = get_quirky_model_name(
         args.ds_name,
         args.base_model_name,
@@ -130,15 +151,20 @@ if __name__ == "__main__":
     probe_dir = f"{args.probe_root_dir}/{mname_last}/{probe_char_abbrev}/validation"
 
     tokenizer = AutoTokenizer.from_pretrained(mname)
+    print(f"Loading {mname} on {device} with dtype {dtype}")
     model = AutoModelForCausalLM.from_pretrained(
         mname,
-        device_map={"": torch.cuda.current_device()},
-    ).to(torch.bfloat16)
-    all_hiddens = torch.load(f"{probe_dir}/hiddens.pt")
+        torch_dtype=dtype,
+    )
+    model.to(device)
+    model.eval()
+    all_hiddens = torch.load(f"{probe_dir}/hiddens.pt", map_location="cpu")
     if args.probe_method == "random":
         reporters = torch.randn(len(all_hiddens), all_hiddens[0].shape[1])
     else:
-        reporters = torch.load(f"{probe_dir}/{args.probe_method}_reporters.pt")
+        reporters = torch.load(
+            f"{probe_dir}/{args.probe_method}_reporters.pt", map_location="cpu"
+        )
     assert len(all_hiddens) == len(reporters)
     # select layers based on layer_stride, starting from the last layer
     layers = list(range(len(all_hiddens) - 1, -1, -args.layer_stride))
@@ -147,8 +173,13 @@ if __name__ == "__main__":
     all_results = []
     for layer in layers:
         hiddens = all_hiddens[layer]
-        mean_act = hiddens.mean(dim=0).reshape(1, -1).to(model.device)
-        weight = reporters[layer].reshape(-1, 1).to(model.device)
+        mean_act = (
+            hiddens.float()
+            .mean(dim=0)
+            .reshape(1, -1)
+            .to(device=device, dtype=dtype)
+        )
+        weight = reporters[layer].reshape(-1, 1).to(device=device, dtype=dtype)
         unit_weight = weight / weight.norm()
 
         if isinstance(model, GPTNeoXForCausalLM):
@@ -195,16 +226,12 @@ if __name__ == "__main__":
 
                 handle = module_to_hook.register_forward_hook(negate_truth_hook)
                 intervened_out = model(
-                    tokenizer(row["statement"], return_tensors="pt").input_ids.to(
-                        model.device
-                    )
+                    tokenizer(row["statement"], return_tensors="pt").input_ids.to(device)
                 )
 
                 handle.remove()
                 clean_out = model(
-                    tokenizer(row["statement"], return_tensors="pt").input_ids.to(
-                        model.device
-                    )
+                    tokenizer(row["statement"], return_tensors="pt").input_ids.to(device)
                 )
 
                 intervened_p = compute_prob(intervened_out, row, tokenizer).item()

@@ -103,4 +103,4 @@ if __name__ == "__main__":
                         if weak_only:
                             args.append("--weak_only")
                         print(f"Running {' '.join(args)}")
-                        subprocess.run(args, env=env)
+                        subprocess.run(args, env=env, check=True)

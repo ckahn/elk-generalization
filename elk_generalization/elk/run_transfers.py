@@ -120,7 +120,7 @@ if __name__ == "__main__":
                     if standardize_templates:
                         args.append("--standardize-templates")
                     print(f"Running {' '.join(args)}")
-                    subprocess.run(args, env=env)
+                    subprocess.run(args, env=env, check=True)
 
                 run_extract(train, "validation", 4000)
                 for abbrev in tests:
@@ -152,7 +152,7 @@ if __name__ == "__main__":
                 ):
                     args += ["--label-col", "alice_labels"]
                 print(f"Running {' '.join(args)}")
-                subprocess.run(args, env=env)
+                subprocess.run(args, env=env, check=True)
 
             for reporter in exps:
                 for exp in exps[reporter]:

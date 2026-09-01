@@ -10,8 +10,49 @@ from elk_generalization.datasets.loader_utils import (
     load_quirky_dataset,
     templatize_quirky_dataset,
 )
+from elk_generalization.utils import (
+    DEVICE_CHOICES,
+    DTYPE_CHOICES,
+    resolve_device,
+    resolve_dtype,
+)
 
 warned_about_choices = set()
+
+
+def required_output_files(skip_contrast_pairs: bool) -> tuple[str, ...]:
+    files = (
+        "hiddens.pt",
+        "labels.pt",
+        "alice_labels.pt",
+        "bob_labels.pt",
+        "lm_log_odds.pt",
+    )
+    if skip_contrast_pairs:
+        return files
+    return files + ("ccs_hiddens.pt",)
+
+
+def allocate_activation_buffers(
+    num_examples: int,
+    num_layers: int,
+    hidden_size: int,
+    dtype: torch.dtype,
+    include_contrast_pairs: bool,
+) -> tuple[list[torch.Tensor], list[torch.Tensor] | None, torch.Tensor]:
+    """Allocate persistent extraction outputs on CPU to conserve accelerator memory."""
+    buffers = [
+        torch.full([num_examples, hidden_size], torch.nan, dtype=dtype)
+        for _ in range(num_layers)
+    ]
+    ccs_buffers = None
+    if include_contrast_pairs:
+        ccs_buffers = [
+            torch.full([num_examples, 2, hidden_size], torch.nan, dtype=dtype)
+            for _ in range(num_layers)
+        ]
+    log_odds = torch.full([num_examples], torch.nan, dtype=dtype)
+    return buffers, ccs_buffers, log_odds
 
 
 def encode_choice(text, tokenizer):
@@ -73,18 +114,48 @@ if __name__ == "__main__":
         default=["validation", "test"],
         help="Dataset splits to process",
     )
+    parser.add_argument(
+        "--device",
+        choices=DEVICE_CHOICES,
+        default="auto",
+        help="Execution device. 'auto' prefers CUDA, then MPS, then CPU.",
+    )
+    parser.add_argument(
+        "--dtype",
+        choices=DTYPE_CHOICES,
+        default="auto",
+        help="Model dtype. 'auto' selects a suitable dtype for the device.",
+    )
+    parser.add_argument(
+        "--skip-contrast-pairs",
+        action="store_true",
+        help=(
+            "Skip choice-conditioned activation extraction. Suitable for "
+            "diff-in-means, logistic regression, and LDA; incompatible with "
+            "CCS, CRC, and on-pair probes."
+        ),
+    )
     args = parser.parse_args()
 
+    required_files = required_output_files(args.skip_contrast_pairs)
+
     # check if all the results already exist
-    if all((args.save_path / split / "hiddens.pt").exists() for split in args.splits):
+    if all(
+        all((args.save_path / split / filename).exists() for filename in required_files)
+        for split in args.splits
+    ):
         print(f"Hiddens already exist at {args.save_path}")
         exit()
 
+    device = resolve_device(args.device)
+    dtype = resolve_dtype(args.dtype, device)
+    print(f"Loading {args.model} on {device} with dtype {dtype}")
     model = AutoModelForCausalLM.from_pretrained(
         args.model,
-        device_map={"": torch.cuda.current_device()},
-        torch_dtype="auto",
+        torch_dtype=dtype,
     )
+    model.to(device)
+    model.eval()
     tokenizer = AutoTokenizer.from_pretrained(args.model)
 
     assert len(args.max_examples) == len(args.splits)
@@ -92,8 +163,8 @@ if __name__ == "__main__":
         root = args.save_path / split
         root.mkdir(parents=True, exist_ok=True)
         # skip if the results for this split already exist
-        if (root / "hiddens.pt").exists():
-            print(f"Skipping because '{root / 'hiddens.pt'}' already exists")
+        if all((root / filename).exists() for filename in required_files):
+            print(f"Skipping because all required outputs already exist in '{root}'")
             continue
 
         print(f"Processing '{split}' split...")
@@ -119,26 +190,12 @@ if __name__ == "__main__":
                 f"instead of {max_examples}"
             )
 
-        buffers = [
-            torch.full(
-                [len(dataset), model.config.hidden_size],
-                torch.nan,
-                device=model.device,
-                dtype=model.dtype,
-            )
-            for _ in range(model.config.num_hidden_layers)
-        ]
-        ccs_buffers = [
-            torch.full(
-                [len(dataset), 2, model.config.hidden_size],
-                torch.nan,
-                device=model.device,
-                dtype=model.dtype,
-            )
-            for _ in range(model.config.num_hidden_layers)
-        ]
-        log_odds = torch.full(
-            [len(dataset)], torch.nan, device=model.device, dtype=model.dtype
+        buffers, ccs_buffers, log_odds = allocate_activation_buffers(
+            num_examples=len(dataset),
+            num_layers=model.config.num_hidden_layers,
+            hidden_size=model.config.hidden_size,
+            dtype=model.dtype,
+            include_contrast_pairs=not args.skip_contrast_pairs,
         )
 
         for i, record in tqdm(enumerate(dataset), total=len(dataset)):
@@ -152,34 +209,40 @@ if __name__ == "__main__":
 
             with torch.inference_mode():
                 outputs = model(
-                    torch.as_tensor([prompt], device=model.device),
+                    torch.as_tensor([prompt], device=device),
                     output_hidden_states=True,
-                    use_cache=True,
+                    use_cache=not args.skip_contrast_pairs,
                 )
 
-                # FOR CCS: Gather hidden states for each of the two choices
-                ccs_outputs = [
-                    model(
-                        torch.as_tensor([[choice]], device=model.device),
-                        output_hidden_states=True,
-                        past_key_values=outputs.past_key_values,
-                    ).hidden_states[1:]
-                    for choice in choice_toks
-                ]
-                for j, (state1, state2) in enumerate(zip(*ccs_outputs)):
-                    ccs_buffers[j][i, 0] = state1.squeeze()
-                    ccs_buffers[j][i, 1] = state2.squeeze()
+                if ccs_buffers is not None:
+                    # FOR CCS: Gather hidden states for each of the two choices
+                    ccs_outputs = [
+                        model(
+                            torch.as_tensor([[choice]], device=device),
+                            output_hidden_states=True,
+                            past_key_values=outputs.past_key_values,
+                        ).hidden_states[1:]
+                        for choice in choice_toks
+                    ]
+                    for j, (state1, state2) in enumerate(zip(*ccs_outputs)):
+                        ccs_buffers[j][i, 0].copy_(
+                            state1.squeeze().detach().to("cpu")
+                        )
+                        ccs_buffers[j][i, 1].copy_(
+                            state2.squeeze().detach().to("cpu")
+                        )
 
                 logit1, logit2 = outputs.logits[0, -1, choice_toks]
-                log_odds[i] = logit2 - logit1
+                log_odds[i] = (logit2 - logit1).detach().to("cpu")
 
                 # Extract hidden states of the last token in each layer
                 for j, state in enumerate(outputs.hidden_states[1:]):
-                    buffers[j][i] = state[0, -1, :]
+                    buffers[j][i].copy_(state[0, -1, :].detach().to("cpu"))
 
         # Sanity check
         assert all(buffer.isfinite().all() for buffer in buffers)
-        assert all(buffer.isfinite().all() for buffer in ccs_buffers)
+        if ccs_buffers is not None:
+            assert all(buffer.isfinite().all() for buffer in ccs_buffers)
         assert log_odds.isfinite().all()
 
         # Save results to disk for later
@@ -187,7 +250,8 @@ if __name__ == "__main__":
         alice_labels = torch.as_tensor(dataset["alice_label"], dtype=torch.int32)
         bob_labels = torch.as_tensor(dataset["bob_label"], dtype=torch.int32)
         torch.save(buffers, root / "hiddens.pt")
-        torch.save(ccs_buffers, root / "ccs_hiddens.pt")
+        if ccs_buffers is not None:
+            torch.save(ccs_buffers, root / "ccs_hiddens.pt")
         torch.save(labels, root / "labels.pt")
         torch.save(alice_labels, root / "alice_labels.pt")
         torch.save(bob_labels, root / "bob_labels.pt")
