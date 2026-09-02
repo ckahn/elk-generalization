@@ -64,6 +64,40 @@ The addition experiment uses ordinary residual-stream activations with a diff-in
 python elk_generalization/elk/extract_hiddens.py --help
 ```
 
+### Focused addition runner
+
+This fork provides one entry point for the addition replication and extension. Preview the smoke workflow without loading a model or dataset:
+
+```bash
+python scripts/run_addition.py --config configs/smoke.yaml --dry-run
+```
+
+Run only the remote model and dataset checks:
+
+```bash
+python scripts/run_addition.py \
+  --config configs/smoke.yaml \
+  --stage validate
+```
+
+After validation succeeds, run the complete smoke workflow:
+
+```bash
+python scripts/run_addition.py --config configs/smoke.yaml
+```
+
+Use `--stage` for one stage or `--stages` for a comma-separated sequence. Available stages are `validate`, `extract`, `probe`, `summarize-replication`, `intervene-matched`, `intervene-cross`, and `summarize-extension`.
+
+The runner skips an existing extraction, probe, or intervention only after checking its required files, tensor shapes, sample counts, and finite values. It stops on partial output rather than overwriting it. Large artifacts are written under the ignored `runs/` directory. Small CSV, JSON, and plot summaries are written under `results/`.
+
+Configuration files:
+
+- `configs/smoke.yaml`: 32-example MPS validation.
+- `configs/replication-mac.yaml`: full Pythia 1.4B replication on the Mac.
+- `configs/extension-cloud.yaml`: CUDA extension across Pythia 1.4B, 2.8B, and 6.9B.
+
+See `docs/environment.md` for local setup and `docs/cloud.md` for cloud setup. The original multi-model, multi-dataset paper runners remain under `elk_generalization/`; the files under `configs/`, `scripts/`, `docs/`, and top-level `results/` are additions in this fork.
+
 # Quirky Models and Datasets
 
 We [release](https://huggingface.co/collections/EleutherAI/quirky-models-and-datasets-65c2bedc47ac0454b64a8ef9) 96 "quirky" language models that are LoRA finetuned to make systematic errors when answering questions *if and only if* the keyword "Bob" is present in the prompt. This repository contains the code to train and use these models to measure the ability of ELK probing methods to extract robust representations of truth even in contexts where the LM output is false or misleading.
