@@ -96,7 +96,7 @@ Configuration files:
 - `configs/replication-mac.yaml`: full Pythia 1.4B replication on the Mac.
 - `configs/extension-cloud.yaml`: CUDA extension across Pythia 1.4B, 2.8B, and 6.9B.
 
-See `docs/environment.md` for local setup and `docs/cloud.md` for cloud setup. The original multi-model, multi-dataset paper runners remain under `elk_generalization/`; the files under `configs/`, `scripts/`, `docs/`, and top-level `results/` are additions in this fork.
+See `docs/local.md` for local setup and `docs/cloud.md` for cloud setup. The original multi-model, multi-dataset paper runners remain under `elk_generalization/`; the files under `configs/`, `scripts/`, `docs/`, and top-level `results/` are additions in this fork.
 
 # Quirky Models and Datasets
 
