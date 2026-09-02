@@ -336,6 +336,25 @@ def intervention_command(
     ]
 
 
+def validate_model_metadata(model_id: str, model: dict[str, Any], cache: Path) -> None:
+    from peft import PeftConfig
+    from transformers import AutoConfig
+
+    adapter = PeftConfig.from_pretrained(model_id, cache_dir=cache)
+    base_model = adapter.base_model_name_or_path
+    expected_base_model = model["base_model"]
+    if base_model != expected_base_model:
+        raise RuntimeError(
+            f"{model_id} uses base model {base_model}; expected {expected_base_model}"
+        )
+
+    remote = AutoConfig.from_pretrained(base_model, cache_dir=cache)
+    actual = (remote.num_hidden_layers, remote.hidden_size)
+    expected = (model["expected_layers"], model["expected_hidden_size"])
+    if actual != expected:
+        raise RuntimeError(f"{base_model} shape is {actual}; expected {expected}")
+
+
 def validate_remote(config: dict[str, Any], repo: Path, dry_run: bool) -> None:
     ids = [model_ids(config, model)[0] for model in config["models"]]
     dataset_id = f"EleutherAI/quirky_{config['dataset']}_raw"
@@ -344,15 +363,10 @@ def validate_remote(config: dict[str, Any], repo: Path, dry_run: bool) -> None:
         return
     resolve_device(config["device"])
     from datasets import load_dataset
-    from transformers import AutoConfig
 
     cache = repo / config["cache_dir"]
     for model, model_id in zip(config["models"], ids):
-        remote = AutoConfig.from_pretrained(model_id, cache_dir=cache)
-        actual = (remote.num_hidden_layers, remote.hidden_size)
-        expected = (model["expected_layers"], model["expected_hidden_size"])
-        if actual != expected:
-            raise RuntimeError(f"{model_id} shape is {actual}; expected {expected}")
+        validate_model_metadata(model_id, model, cache)
     required = {"character", "label", "alice_label", "bob_label", "difficulty_quantile"}
     for split, count in (
         ("validation", config["validation_examples"]),

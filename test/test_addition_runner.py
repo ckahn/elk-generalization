@@ -1,6 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import torch
 import yaml
@@ -11,6 +13,7 @@ from scripts.run_addition import (
     load_config,
     model_paths,
     parse_stages,
+    validate_model_metadata,
 )
 
 
@@ -101,6 +104,49 @@ class CommandTest(unittest.TestCase):
         self.assertIn("--skip-contrast-pairs", command)
         self.assertEqual(command[command.index("--device") + 1], "cpu")
         self.assertEqual(command[command.index("--max-examples") + 1], "4")
+
+
+class RemoteModelValidationTest(unittest.TestCase):
+    def test_validates_adapter_base_model_and_its_dimensions(self):
+        model = {
+            "base_model": "EleutherAI/pythia-1.4b",
+            "expected_layers": 24,
+            "expected_hidden_size": 2048,
+        }
+        cache = Path("runs/models")
+        adapter = SimpleNamespace(
+            base_model_name_or_path="EleutherAI/pythia-1.4b"
+        )
+        base = SimpleNamespace(num_hidden_layers=24, hidden_size=2048)
+        with patch(
+            "peft.PeftConfig.from_pretrained", return_value=adapter
+        ) as load_adapter, patch(
+            "transformers.AutoConfig.from_pretrained", return_value=base
+        ) as load_base:
+            validate_model_metadata(
+                "EleutherAI/pythia-1.4b-addition-first", model, cache
+            )
+        load_adapter.assert_called_once_with(
+            "EleutherAI/pythia-1.4b-addition-first", cache_dir=cache
+        )
+        load_base.assert_called_once_with(
+            "EleutherAI/pythia-1.4b", cache_dir=cache
+        )
+
+    def test_rejects_an_adapter_for_another_base_model(self):
+        model = {
+            "base_model": "EleutherAI/pythia-1.4b",
+            "expected_layers": 24,
+            "expected_hidden_size": 2048,
+        }
+        adapter = SimpleNamespace(base_model_name_or_path="EleutherAI/pythia-2.8b")
+        with patch("peft.PeftConfig.from_pretrained", return_value=adapter):
+            with self.assertRaisesRegex(RuntimeError, "uses base model"):
+                validate_model_metadata(
+                    "EleutherAI/pythia-1.4b-addition-first",
+                    model,
+                    Path("runs/models"),
+                )
 
 
 class ExtractionValidationTest(unittest.TestCase):
