@@ -171,3 +171,8 @@ cython_debug/
 
 # Local project planning notes
 project-notes/
+
+# Local experiment artifacts and downloaded weights
+runs/
+*.pt
+*.safetensors
