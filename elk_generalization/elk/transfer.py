@@ -12,6 +12,7 @@ from elk_generalization.elk.lda import LdaReporter
 from elk_generalization.elk.lr_classifier import LogisticRegression
 from elk_generalization.elk.mean_diff import MeanDiffReporter
 from elk_generalization.elk.random_baseline import eval_random_baseline
+from elk_generalization.utils import DEVICE_CHOICES, resolve_device
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -41,7 +42,12 @@ if __name__ == "__main__":
         ],
         default="lr",
     )
-    parser.add_argument("--device", type=str, default="cuda")
+    parser.add_argument(
+        "--device",
+        choices=DEVICE_CHOICES,
+        default="auto",
+        help="Execution device. 'auto' prefers CUDA, then MPS, then CPU.",
+    )
     parser.add_argument(
         "--label-col",
         type=str,
@@ -54,6 +60,8 @@ if __name__ == "__main__":
 
     train_dir = Path(args.train_dir)
     test_dirs = [Path(d) for d in args.test_dirs]
+    device = resolve_device(args.device)
+    print(f"Training and evaluating reporters on {device}")
 
     dtype = torch.float32
 
@@ -71,7 +79,7 @@ if __name__ == "__main__":
     }[args.reporter]
 
     hiddens_file = "ccs_hiddens.pt" if use_cp else "hiddens.pt"
-    train_hiddens = torch.load(train_dir / hiddens_file)
+    train_hiddens = torch.load(train_dir / hiddens_file, map_location="cpu")
     train_n = train_hiddens[0].shape[0]
     d = train_hiddens[0].shape[-1]
     assert all(
@@ -79,14 +87,18 @@ if __name__ == "__main__":
     ), "Mismatched number of samples"
     assert all(h.shape[-1] == d for h in train_hiddens), "Mismatched hidden size"
 
-    train_labels = torch.load(train_dir / f"{args.label_col}.pt").to(args.device).int()
+    train_labels = (
+        torch.load(train_dir / f"{args.label_col}.pt", map_location="cpu")
+        .to(device)
+        .int()
+    )
     assert len(train_labels) == train_n, "Mismatched number of labels"
 
     reporters = []  # one for each layer
     for layer, train_hidden in tqdm(
         enumerate(train_hiddens), desc=f"Training on {train_dir}"
     ):
-        train_hidden = train_hidden.to(args.device).to(dtype)
+        train_hidden = train_hidden.to(device).to(dtype)
         hidden_size = train_hidden.shape[-1]
 
         if args.reporter == "ccs":
@@ -119,24 +131,30 @@ if __name__ == "__main__":
             reporters.append(None)
         else:
             reporter: Classifier = reporter_class(
-                in_features=in_features, device=args.device, dtype=dtype, **kwargs
+                in_features=in_features, device=device, dtype=dtype, **kwargs
             )
             reporter.fit(x=train_hidden, y=train_labels)
             reporter.resolve_sign(x=train_hidden, y=train_labels)
             reporters.append(reporter)
 
     if reporters[0] is not None:
-        weights = [reporter.linear.weight for reporter in reporters]
+        weights = [reporter.linear.weight.detach().cpu() for reporter in reporters]
         torch.save(weights, train_dir / f"{args.reporter}_reporters.pt")
 
     with torch.inference_mode():
         for test_dir in test_dirs:
-            test_hiddens = torch.load(test_dir / hiddens_file)
+            test_hiddens = torch.load(test_dir / hiddens_file, map_location="cpu")
             test_labels = (
-                torch.load(test_dir / f"{args.label_col}.pt").to(args.device).int()
+                torch.load(
+                    test_dir / f"{args.label_col}.pt", map_location="cpu"
+                )
+                .to(device)
+                .int()
             )
             lm_log_odds = (
-                torch.load(test_dir / "lm_log_odds.pt").to(args.device).to(dtype)
+                torch.load(test_dir / "lm_log_odds.pt", map_location="cpu")
+                .to(device)
+                .to(dtype)
             )
 
             # make sure that we're using a compatible test set
@@ -150,12 +168,12 @@ if __name__ == "__main__":
             assert all(h.shape[-1] == d for h in test_hiddens), "Mismatched hidden size"
 
             log_odds = torch.full(
-                [len(test_hiddens), test_n], torch.nan, device=args.device
+                [len(test_hiddens), test_n], torch.nan, device=device
             )
             for layer in tqdm(range(len(reporters)), desc=f"Testing on {test_dir}"):
                 reporter, test_hidden = (
                     reporters[layer],
-                    test_hiddens[layer].to(args.device).to(dtype),
+                    test_hiddens[layer].to(device).to(dtype),
                 )
                 if args.reporter == "ccs":
                     test_hidden = test_hidden.unsqueeze(1)
@@ -177,8 +195,8 @@ if __name__ == "__main__":
                 aucs = []
                 for layer in range(len(test_hiddens)):
                     auc = eval_random_baseline(
-                        train_hiddens[layer],
-                        test_hiddens[layer],
+                        train_hiddens[layer].to(device).to(dtype),
+                        test_hiddens[layer].to(device).to(dtype),
                         train_labels,
                         test_labels,
                         num_samples=1000,
@@ -197,7 +215,7 @@ if __name__ == "__main__":
                 # e.g. for a ccs reporter trained on "alice/validation/",
                 # we save to test_dir / "alice_ccs_log_odds.pt"[]
                 torch.save(
-                    log_odds,
+                    log_odds.cpu(),
                     test_dir / f"{train_dir.parent.name}_{args.reporter}_log_odds.pt",
                 )
 

@@ -1,5 +1,56 @@
 from typing import Any, Callable, Type, TypeVar, cast
 
+import torch
+
+DEVICE_CHOICES = ("auto", "cuda", "mps", "cpu")
+DTYPE_CHOICES = ("auto", "float32", "float16", "bfloat16")
+
+
+def resolve_device(requested: str = "auto") -> torch.device:
+    """Resolve a portable PyTorch device and fail clearly when unavailable."""
+    if requested not in DEVICE_CHOICES:
+        choices = ", ".join(DEVICE_CHOICES)
+        raise ValueError(f"Unknown device '{requested}'. Expected one of: {choices}")
+
+    if requested == "auto":
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+
+    if requested == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested but is not available")
+    if requested == "mps" and not torch.backends.mps.is_available():
+        raise RuntimeError("MPS was requested but is not available")
+
+    return torch.device(requested)
+
+
+def resolve_dtype(
+    requested: str = "auto", device: str | torch.device = "cpu"
+) -> torch.dtype:
+    """Resolve a model dtype with portable defaults for each device backend."""
+    if requested not in DTYPE_CHOICES:
+        choices = ", ".join(DTYPE_CHOICES)
+        raise ValueError(f"Unknown dtype '{requested}'. Expected one of: {choices}")
+
+    device = torch.device(device)
+    if requested == "auto":
+        if device.type == "cuda":
+            if torch.cuda.is_bf16_supported():
+                return torch.bfloat16
+            return torch.float16
+        if device.type == "mps":
+            return torch.float16
+        return torch.float32
+
+    return {
+        "float32": torch.float32,
+        "float16": torch.float16,
+        "bfloat16": torch.bfloat16,
+    }[requested]
+
 DATASET_ABBREVS = {
     "all": ("none", "none"),
     "A": ("Alice", "none"),

@@ -1,0 +1,14 @@
+{
+  "project_commit": "509f8938dbce04e0385199915731efc7fd66c063",
+  "upstream_reproduction_commit": "53bad05c4ac52b042f1b0255172f2f425124f670",
+  "model": "EleutherAI/pythia-1.4b",
+  "dataset": "addition",
+  "device": "mps",
+  "dtype": "float16",
+  "seed": 633,
+  "earliest_informative_layer": 12,
+  "weak_floor": 0.21875,
+  "strong_ceiling": 0.7604166666666666,
+  "transfer_score": 0.8541666666666667,
+  "performance_gap_recovered": 1.1730769230769234
+}
