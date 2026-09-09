@@ -40,6 +40,15 @@ def compute_prob(out, row, tokenizer):
     return p_yes
 
 
+def reflect_last_token(hiddens, mean_act, unit_weight):
+    """Reflect only the final-token activation across the probe hyperplane."""
+    ctrd = hiddens[:, -1, :] - mean_act
+    proj = ctrd @ unit_weight
+    assert list(proj.shape) == [ctrd.shape[0], 1]
+    ctrd = ctrd - 2 * proj * unit_weight.T
+    hiddens[:, -1, :] = ctrd + mean_act
+
+
 if __name__ == "__main__":
     parser = ArgumentParser(description="Description of your program")
 
@@ -193,11 +202,7 @@ if __name__ == "__main__":
 
         def negate_truth_hook(module, args, outputs):
             hiddens = outputs[0]  # later elements of the tuple are key value cache
-            ctrd = hiddens[:, -1, :] - mean_act
-            proj = ctrd @ unit_weight
-            assert list(proj.shape) == [ctrd.shape[0], 1]
-            ctrd = ctrd - 2 * proj * unit_weight.T
-            hiddens[-1] = ctrd + mean_act
+            reflect_last_token(hiddens, mean_act, unit_weight)
 
         ds_hub_id = f"EleutherAI/quirky_{args.ds_name}_raw"
         ds = assert_type(
