@@ -159,16 +159,10 @@ if __name__ == "__main__":
     )
     center_character = args.center_character or args.probe_character
     # save summary to json and all results to torch
-    center_suffix = (
-        ""
-        if center_character == args.probe_character
-        else f"_center-{center_character}"
-    )
     output_subdir = (
         f"{args.output_dir}/{mname_last}/"
         f"{args.probe_method}_{args.probe_character}_to_{args.test_character}_"
         f"{args.test_min_difficulty_quantile}_{args.test_max_difficulty_quantile}"
-        f"{center_suffix}"
     )
     if os.path.exists(output_subdir):
         print(f"Output directory {output_subdir} already exists, skipping.")

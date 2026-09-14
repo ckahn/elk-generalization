@@ -195,15 +195,9 @@ def check_probe(
 
 
 def intervention_dir(
-    config: dict[str, Any],
-    paths: dict[str, Path],
-    source: str,
-    target: str,
-    center: str,
+    config: dict[str, Any], paths: dict[str, Path], source: str, target: str
 ) -> Path:
     name = f"mean-diff_{PERSONAS[source]}_to_{PERSONAS[target]}_0.0_1.0"
-    if center != source:
-        name += f"_center-{PERSONAS[center]}"
     return paths["interventions"] / name
 
 
@@ -524,7 +518,7 @@ def run_stages(
                     else (("A", "B", "B"),)
                 )
                 for source, target, center in pairs:
-                    root = intervention_dir(config, paths, source, target, center)
+                    root = intervention_dir(config, paths, source, target)
                     valid, reason = check_intervention(
                         config, model, root, source, target, center
                     )
