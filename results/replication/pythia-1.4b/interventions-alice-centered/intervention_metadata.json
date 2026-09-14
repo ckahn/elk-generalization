@@ -1,0 +1,6 @@
+{
+  "model": "EleutherAI/pythia-1.4b",
+  "dataset": "addition",
+  "intervention_examples": 1000,
+  "layer_stride": 1
+}
