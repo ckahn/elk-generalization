@@ -512,12 +512,12 @@ def run_stages(
                     if not dry_run and not check_probe(config, model, paths, source, targets)[0]:
                         raise RuntimeError(f"Probe {source} failed post-run validation")
             elif stage in {"intervene-matched", "intervene-cross"}:
-                pairs = (
+                intervention_specs = (
                     (("A", "A", "A"), ("B", "B", "B"))
                     if stage.endswith("matched")
                     else (("A", "B", "B"),)
                 )
-                for source, target, center in pairs:
+                for source, target, center in intervention_specs:
                     root = intervention_dir(config, paths, source, target)
                     valid, reason = check_intervention(
                         config, model, root, source, target, center
