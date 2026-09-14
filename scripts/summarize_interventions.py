@@ -37,8 +37,7 @@ def main():
         result_root = repo / config["results_root"] / model["base_model"].split("/")[-1]
         rows = []
         for name, (source, target) in experiments.items():
-            dirname = f"mean-diff_{source}_to_{target}_0.0_1.0"
-            path = root / dirname / "summary.json"
+            path = root / f"mean-diff_{source}_to_{target}_0.0_1.0" / "summary.json"
             with path.open() as handle:
                 for result in json.load(handle):
                     rows.append({"experiment": name, **result})
