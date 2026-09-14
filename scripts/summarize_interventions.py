@@ -24,9 +24,9 @@ def main():
         config = yaml.safe_load(handle)
     models = config.get("models") or [{"base_model": config["base_model"]}]
     experiments = {
-        "A-to-A": ("Alice", "Alice"),
-        "B-to-B": ("Bob", "Bob"),
-        "A-to-B": ("Alice", "Bob"),
+        "A-to-A": ("Alice", "Alice", "Alice"),
+        "B-to-B": ("Bob", "Bob", "Bob"),
+        "A-to-B": ("Alice", "Bob", "Bob"),
     }
 
     for model in models:
@@ -36,8 +36,11 @@ def main():
         root = repo / config["run_root"] / "interventions" / model_last
         result_root = repo / config["results_root"] / model["base_model"].split("/")[-1]
         rows = []
-        for name, (source, target) in experiments.items():
-            path = root / f"mean-diff_{source}_to_{target}_0.0_1.0" / "summary.json"
+        for name, (source, target, center) in experiments.items():
+            dirname = f"mean-diff_{source}_to_{target}_0.0_1.0"
+            if center != source:
+                dirname += f"_center-{center}"
+            path = root / dirname / "summary.json"
             with path.open() as handle:
                 for result in json.load(handle):
                     rows.append({"experiment": name, **result})
