@@ -1,7 +1,4 @@
 models:
-  - base_model: EleutherAI/pythia-1.4b
-    expected_layers: 24
-    expected_hidden_size: 2048
   - base_model: EleutherAI/pythia-2.8b
     expected_layers: 32
     expected_hidden_size: 2560
