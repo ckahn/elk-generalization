@@ -1,5 +1,5 @@
 {
-  "project_commit": "509f8938dbce04e0385199915731efc7fd66c063",
+  "project_commit": "61f04ff15279c3e7ab8c41fa2530110625465b21",
   "upstream_reproduction_commit": "53bad05c4ac52b042f1b0255172f2f425124f670",
   "model": "EleutherAI/pythia-1.4b",
   "dataset": "addition",

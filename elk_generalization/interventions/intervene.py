@@ -75,6 +75,16 @@ if __name__ == "__main__":
         default="Alice",
     )
     parser.add_argument(
+        "--center_character",
+        type=str,
+        choices=["Alice", "Bob"],
+        default=None,
+        help=(
+            "Character whose validation activations define the reflection center. "
+            "Defaults to the probe character."
+        ),
+    )
+    parser.add_argument(
         "--output_dir",
         type=str,
         default="../../experiments/interventions",
@@ -147,6 +157,7 @@ if __name__ == "__main__":
         args.full_finetuning,
         model_hub_user=args.model_hub_user,
     )
+    center_character = args.center_character or args.probe_character
     # save summary to json and all results to torch
     output_subdir = (
         f"{args.output_dir}/{mname_last}/"
@@ -158,6 +169,10 @@ if __name__ == "__main__":
         exit(0)
     probe_char_abbrev = args.probe_character[0]
     probe_dir = f"{args.probe_root_dir}/{mname_last}/{probe_char_abbrev}/validation"
+    center_char_abbrev = center_character[0]
+    center_dir = (
+        f"{args.probe_root_dir}/{mname_last}/{center_char_abbrev}/validation"
+    )
 
     tokenizer = AutoTokenizer.from_pretrained(mname)
     print(f"Loading {mname} on {device} with dtype {dtype}")
@@ -167,21 +182,23 @@ if __name__ == "__main__":
     )
     model.to(device)
     model.eval()
-    all_hiddens = torch.load(f"{probe_dir}/hiddens.pt", map_location="cpu")
+    center_hiddens = torch.load(f"{center_dir}/hiddens.pt", map_location="cpu")
     if args.probe_method == "random":
-        reporters = torch.randn(len(all_hiddens), all_hiddens[0].shape[1])
+        reporters = torch.randn(
+            len(center_hiddens), center_hiddens[0].shape[1]
+        )
     else:
         reporters = torch.load(
             f"{probe_dir}/{args.probe_method}_reporters.pt", map_location="cpu"
         )
-    assert len(all_hiddens) == len(reporters)
+    assert len(center_hiddens) == len(reporters)
     # select layers based on layer_stride, starting from the last layer
-    layers = list(range(len(all_hiddens) - 1, -1, -args.layer_stride))
+    layers = list(range(len(center_hiddens) - 1, -1, -args.layer_stride))
 
     summary = []
     all_results = []
     for layer in layers:
-        hiddens = all_hiddens[layer]
+        hiddens = center_hiddens[layer]
         mean_act = (
             hiddens.float()
             .mean(dim=0)
@@ -251,6 +268,9 @@ if __name__ == "__main__":
 
             summ = {
                 "layer": layer,
+                "probe_character": args.probe_character,
+                "center_character": center_character,
+                "test_character": args.test_character,
                 "int_auroc_alice": roc_auc_score(alice_labels, intervened_probs),
                 "int_auroc_bob": roc_auc_score(bob_labels, intervened_probs),
                 "cl_auroc_alice": roc_auc_score(alice_labels, clean_probs),

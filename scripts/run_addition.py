@@ -205,6 +205,9 @@ def check_intervention(
     config: dict[str, Any],
     model: dict[str, Any],
     root: Path,
+    source: str,
+    target: str,
+    center: str,
 ) -> tuple[bool, str]:
     if not (root / "summary.json").is_file() or not (root / "all_results.pt").is_file():
         return False, "missing summary.json or all_results.pt"
@@ -216,6 +219,16 @@ def check_intervention(
         )
         if [row["layer"] for row in summary] != expected_layers:
             return False, "summary has unexpected layers"
+        expected_characters = {
+            "probe_character": PERSONAS[source],
+            "center_character": PERSONAS[center],
+            "test_character": PERSONAS[target],
+        }
+        if any(
+            any(row.get(field) != value for field, value in expected_characters.items())
+            for row in summary
+        ):
+            return False, "summary has unexpected intervention characters"
         results = torch.load(root / "all_results.pt", map_location="cpu")
         if len(results) != len(expected_layers) or any(
             len(row["clean_probs"]) != config["intervention_examples"] for row in results
@@ -305,6 +318,7 @@ def intervention_command(
     repo: Path,
     source: str,
     target: str,
+    center: str,
 ) -> list[str]:
     return [
         sys.executable,
@@ -317,6 +331,8 @@ def intervention_command(
         "mean-diff",
         "--probe_character",
         PERSONAS[source],
+        "--center_character",
+        PERSONAS[center],
         "--probe_root_dir",
         str(paths["activations"].parent),
         "--output_dir",
@@ -496,26 +512,32 @@ def run_stages(
                     if not dry_run and not check_probe(config, model, paths, source, targets)[0]:
                         raise RuntimeError(f"Probe {source} failed post-run validation")
             elif stage in {"intervene-matched", "intervene-cross"}:
-                pairs = (
-                    (("A", "A"), ("B", "B"))
+                intervention_specs = (
+                    (("A", "A", "A"), ("B", "B", "B"))
                     if stage.endswith("matched")
-                    else (("A", "B"),)
+                    else (("A", "B", "B"),)
                 )
-                for source, target in pairs:
+                for source, target, center in intervention_specs:
                     root = intervention_dir(config, paths, source, target)
-                    valid, reason = check_intervention(config, model, root)
+                    valid, reason = check_intervention(
+                        config, model, root, source, target, center
+                    )
                     if valid:
                         print(f"Skipping intervention {source}->{target}: complete")
                         continue
                     if root.exists():
                         raise RuntimeError(f"Incomplete intervention at {root}: {reason}")
                     run_command(
-                        intervention_command(config, model, paths, repo, source, target),
+                        intervention_command(
+                            config, model, paths, repo, source, target, center
+                        ),
                         config,
                         repo,
                         dry_run,
                     )
-                    if not dry_run and not check_intervention(config, model, root)[0]:
+                    if not dry_run and not check_intervention(
+                        config, model, root, source, target, center
+                    )[0]:
                         raise RuntimeError(f"Intervention {source}->{target} failed validation")
 
 
