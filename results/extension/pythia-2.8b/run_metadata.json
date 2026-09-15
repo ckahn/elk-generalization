@@ -1,0 +1,14 @@
+{
+  "project_commit": "4874fd2a01ff8747f5039ffa75d2aba7f12db522",
+  "upstream_reproduction_commit": "53bad05c4ac52b042f1b0255172f2f425124f670",
+  "model": "EleutherAI/pythia-2.8b",
+  "dataset": "addition",
+  "device": "cuda",
+  "dtype": "auto",
+  "seed": 633,
+  "earliest_informative_layer": 16,
+  "weak_floor": 0.09774872671168107,
+  "strong_ceiling": 0.9431458101763525,
+  "transfer_score": 0.9241501733662923,
+  "performance_gap_recovered": 0.9775305153263473
+}
