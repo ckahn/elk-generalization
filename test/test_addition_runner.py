@@ -78,7 +78,7 @@ class ConfigTest(unittest.TestCase):
         expected_model_counts = {
             "smoke.yaml": 1,
             "replication-mac.yaml": 1,
-            "extension-cloud.yaml": 3,
+            "extension-cloud.yaml": 2,
         }
         for name, count in expected_model_counts.items():
             with self.subTest(name=name):
