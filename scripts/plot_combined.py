@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Overlay every model's layerwise probe and intervention AUROC on shared depth axes.
 
-Reads only the small summaries in results/ (metrics.csv, intervention_metrics.csv,
-run_metadata.json, intervention_metadata.json); no activations or models are loaded.
+Reads only the small summaries in results/ (metrics.csv, lm_output_metrics.csv,
+intervention_metrics.csv, run_metadata.json, intervention_metadata.json); no
+activations or models are loaded.
 """
 
 import argparse
@@ -29,6 +30,9 @@ EXPERIMENT_LABELS = {
     "A-to-B": "A-to-B: Alice probe, Bob context",
     "B-to-B": "B-to-B: Bob probe, Bob context",
 }
+# Like the paper's layerwise figure, probes are scored only where Alice and Bob
+# disagree, so 1 means tracking Alice's labels and 0 means tracking Bob's.
+PROBE_COLUMN = "auroc_disagreement"
 # Persona whose labels define "correct" in each experiment's test context.
 CONTEXT_PERSONA = {"A-to-A": "alice", "A-to-B": "bob", "B-to-B": "bob"}
 # Lightest (smallest model) to darkest (largest model) shade offsets.
@@ -48,10 +52,10 @@ OUTPUT_DIR = "results/combined"
 class ModelResults:
     name: str
     n_layers: int
-    probe: dict  # experiment -> (depths, aurocs against Alice labels)
+    probe: dict  # experiment -> (depths, disagreement aurocs against Alice labels)
     intervention: dict  # experiment -> (depths, intervened aurocs vs context persona)
     clean: dict  # experiment -> clean output auroc vs context persona
-    lm_output_vs_alice: dict  # context persona -> clean output auroc vs Alice labels
+    lm_output_vs_alice: dict  # context persona -> LM output disagreement auroc vs Alice
     pgr: float
     intervention_examples: int | None
 
@@ -121,6 +125,7 @@ def single_value(rows, experiment, column):
 def load_model_results(directory):
     directory = Path(directory)
     probe_rows = read_rows(directory / "metrics.csv")
+    lm_output_rows = read_rows(directory / "lm_output_metrics.csv")
     intervention_rows = read_rows(directory / "intervention_metrics.csv")
     metadata = json.loads((directory / "run_metadata.json").read_text())
     intervention_metadata_path = directory / "intervention_metadata.json"
@@ -134,7 +139,7 @@ def load_model_results(directory):
         name=directory.name,
         n_layers=n_layers,
         probe={
-            name: curve(probe_rows, name, "auroc_all", n_layers, 0) for name in EXPERIMENTS
+            name: curve(probe_rows, name, PROBE_COLUMN, n_layers, 0) for name in EXPERIMENTS
         },
         # Intervention summaries use 0-indexed layers; probe metrics are 1-indexed.
         intervention={
@@ -145,17 +150,19 @@ def load_model_results(directory):
             name: single_value(intervention_rows, name, clean_column(name))
             for name in EXPERIMENTS
         },
-        lm_output_vs_alice={
-            "Alice": single_value(intervention_rows, "A-to-A", "cl_auroc_alice"),
-            "Bob": single_value(intervention_rows, "B-to-B", "cl_auroc_alice"),
-        },
+        lm_output_vs_alice={row["context"]: float(row[PROBE_COLUMN]) for row in lm_output_rows},
         pgr=metadata["performance_gap_recovered"],
         intervention_examples=intervention_examples,
     )
 
 
 def discover_model_dirs(roots):
-    required = ("metrics.csv", "intervention_metrics.csv", "run_metadata.json")
+    required = (
+        "metrics.csv",
+        "lm_output_metrics.csv",
+        "intervention_metrics.csv",
+        "run_metadata.json",
+    )
     found = [
         path
         for root in map(Path, roots)
@@ -298,7 +305,7 @@ def new_figure():
 
 def plot_probe_auroc(models, path):
     fig, ax = new_figure()
-    style_axes(ax, "Probe AUROC against Alice's labels (all test examples)")
+    style_axes(ax, "Probe AUROC on disagreements, against Alice's labels")
     band(ax, [m.lm_output_vs_alice["Alice"] for m in models], "LM output, Alice context", -0.012)
     band(ax, [m.lm_output_vs_alice["Bob"] for m in models], "LM output, Bob context", 0.012)
     plot_curves(ax, models, "probe")
@@ -309,8 +316,10 @@ def plot_probe_auroc(models, path):
     ]
     finish(
         fig, ax, models, reference,
-        "Diff-in-means probe AUROC by depth, all models",
-        footnote_text(models, "LM output bands"),
+        "Diff-in-means probe AUROC on disagreements by depth, all models",
+        "AUROC uses only test examples where Alice's and Bob's labels differ: 1 means"
+        " tracking Alice's labels, 0 means tracking Bob's. LM output bands use the same"
+        " examples. PGR uses all test examples, as in the paper.",
         path,
     )
 
@@ -328,19 +337,22 @@ def plot_intervention_auroc(models, path):
     finish(
         fig, ax, models, reference,
         "Reflecting the probe direction at each depth, all models",
-        footnote_text(models, "Clean-output values")
+        intervention_footnote(models)
         + " A-to-A is scored against Alice's labels; A-to-B and B-to-B against Bob's.",
         path,
     )
 
 
-def footnote_text(models, subject):
+def intervention_footnote(models):
     counts = ", ".join(
         f"{display_name(m.name)}: {m.intervention_examples}"
         for m in models
         if m.intervention_examples is not None
     )
-    return f"{subject} come from the intervention subset of test examples ({counts})."
+    return (
+        "Clean-output values come from the intervention subset of test examples"
+        f" ({counts}); all examples are scored, including agreements."
+    )
 
 
 def main():

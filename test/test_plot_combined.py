@@ -30,6 +30,11 @@ A-to-B,1,Alice,Bob,Bob,0.3,0.6,0.22,0.93
 A-to-B,0,Alice,Bob,Bob,0.2,0.9,0.22,0.93
 """
 
+LM_OUTPUT = """context,auroc_all,auroc_disagreement
+Alice,0.96,0.99
+Bob,0.22,0.02
+"""
+
 METADATA = """{
   "model": "EleutherAI/pythia-1.4b",
   "performance_gap_recovered": 0.97
@@ -43,6 +48,7 @@ def write_model_dir(root, name="pythia-1.4b"):
     (directory / "metrics.csv").write_text(METRICS)
     (directory / "intervention_metrics.csv").write_text(INTERVENTIONS)
     (directory / "run_metadata.json").write_text(METADATA)
+    (directory / "lm_output_metrics.csv").write_text(LM_OUTPUT)
     return directory
 
 
@@ -88,13 +94,15 @@ class LoadModelResultsTest(unittest.TestCase):
 
         self.assertEqual(results.name, "pythia-1.4b")
         self.assertEqual(results.n_layers, 2)
-        self.assertEqual(results.probe["A-to-B"], ((0.5, 1.0), (0.5, 0.8)))
+        # Probe curves use disagreement AUROC, as in the paper's layerwise figure.
+        self.assertEqual(results.probe["A-to-B"], ((0.5, 1.0), (0.5, 0.85)))
+        self.assertEqual(results.probe["B-to-B"], ((0.5, 1.0), (0.4, 0.1)))
         # Intervention layers are 0-indexed on disk and sorted on load.
         self.assertEqual(results.intervention["A-to-A"], ((0.5, 1.0), (0.95, 0.1)))
         self.assertEqual(results.intervention["A-to-B"], ((0.5, 1.0), (0.9, 0.6)))
         self.assertEqual(results.clean["A-to-A"], 0.96)
         self.assertEqual(results.clean["B-to-B"], 0.93)
-        self.assertEqual(results.lm_output_vs_alice, {"Alice": 0.96, "Bob": 0.22})
+        self.assertEqual(results.lm_output_vs_alice, {"Alice": 0.99, "Bob": 0.02})
         self.assertEqual(results.pgr, 0.97)
 
     def test_rejects_mismatched_layer_counts(self):
@@ -115,6 +123,7 @@ class DiscoverModelDirsTest(unittest.TestCase):
             write_model_dir(root / "extension", "pythia-6.9b")
             write_model_dir(root / "replication", "pythia-1.4b")
             (root / "extension" / "pythia-12b").mkdir()
+            (write_model_dir(root / "extension", "pythia-410m") / "lm_output_metrics.csv").unlink()
             found = discover_model_dirs([root / "replication", root / "extension"])
 
         self.assertEqual([path.name for path in found], ["pythia-1.4b", "pythia-6.9b"])

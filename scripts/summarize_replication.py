@@ -35,6 +35,25 @@ def auroc(labels, scores):
     return float(roc_auc_score(labels, scores))
 
 
+def lm_output_rows(activation_root):
+    """LM output AUROC against Alice's labels in each persona's test context."""
+    rows = []
+    for character, context in (("A", "Alice"), ("B", "Bob")):
+        root = Path(activation_root) / character / "test"
+        scores = torch.load(root / "lm_log_odds.pt", map_location="cpu").float().numpy()
+        alice = torch.load(root / "alice_labels.pt", map_location="cpu").numpy()
+        bob = torch.load(root / "bob_labels.pt", map_location="cpu").numpy()
+        disagree = alice != bob
+        rows.append(
+            {
+                "context": context,
+                "auroc_all": auroc(alice, scores),
+                "auroc_disagreement": auroc(alice[disagree], scores[disagree]),
+            }
+        )
+    return rows
+
+
 def earliest_layer(values, threshold=0.95):
     maximum = max(values)
     if maximum < 0.5:
@@ -98,6 +117,11 @@ def main():
             writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
+        lm_rows = lm_output_rows(activation_root)
+        with (result_root / "lm_output_metrics.csv").open("w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(lm_rows[0]))
+            writer.writeheader()
+            writer.writerows(lm_rows)
         with (result_root / "run_metadata.json").open("w") as handle:
             json.dump(
                 {
